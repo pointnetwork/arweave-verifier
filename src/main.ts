@@ -1,5 +1,4 @@
 import { queueBroker } from './utils/queueBroker';
-import './healthServer';
 import { log } from './utils/logger';
 import { arweaveTxVerifier, chunkIdVerifier } from './arweaveVerifier';
 
