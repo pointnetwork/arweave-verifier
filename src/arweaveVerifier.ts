@@ -52,9 +52,7 @@ export async function chunkIdVerifier(msg) {
     const arweaveTxId = await getTxIdForChunkId(chunkId);
     if (!arweaveTxId) {
       await queueBroker.sendMessage('upload', { ...content });
-      log.info(
-        'ChunkId not found in arweave, send message to arweaveUploader'
-      );
+      log.info('ChunkId not found in arweave, send message to arweaveUploader');
     } else {
       log.info(
         `ChunkId found in arweave tx: ${arweaveTxId}, check tx status and we are done`

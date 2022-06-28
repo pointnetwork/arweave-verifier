@@ -1,15 +1,19 @@
-import {gql} from 'graphql-request';
+import { gql } from 'graphql-request';
 import config from 'config';
 
 const getDownloadQuery = (chunkId: string, sort?: 'asc' | 'desc'): string =>
-    gql`{
+  gql`{
       transactions(
-        ${sort && (sort === 'asc' ? 'sort: HEIGHT_ASC,' : 'sort: HEIGHT_DESC,') || ''}
+        ${
+          (sort &&
+            (sort === 'asc' ? 'sort: HEIGHT_ASC,' : 'sort: HEIGHT_DESC,')) ||
+          ''
+        }
         tags: [
           {
             name: "__pn_chunk_${config.get(
-        'storage.arweave_experiment_version_major'
-    )}.${config.get('storage.arweave_experiment_version_minor')}_id",
+              'storage.arweave_experiment_version_major'
+            )}.${config.get('storage.arweave_experiment_version_minor')}_id",
             values: ["${chunkId}"]
           }
         ]
