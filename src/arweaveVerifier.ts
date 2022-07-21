@@ -5,12 +5,27 @@ import { getContent } from './utils/getContent';
 import { queueBroker } from './utils/queueBroker';
 import getDownloadQuery from './utils/getDownloadQuery';
 import { hashFn } from './utils/hashFn';
-import { delay } from './utils/delay';
 import { log } from './utils/logger';
 import { safeStringify } from './utils/safeStringify';
 import { getStatus } from './arweaveTransport';
+import {
+  getRandomTimeInMinutes,
+  MILLISECONDS_IN_SECOND,
+  SECONDS_IN_MINUTE,
+} from './utils/getRandomTimeInMinutes';
+import {
+  UPLOAD_TO_ARWEAVE,
+  VERIFY_ARWEAVE_TX,
+  VERIFY_CHUNK_ID,
+} from './utils/queueNames';
 
-const VERIFY_INTERVAL = 60 * 5; // 5 minutes
+const SEND_IMMEDIATELY = 0;
+const MINIMUM_VERIFY_INTERVAL = config.get('minimum_verify_interval');
+const DISCARD_ARWEAVE_TX_TIMEOUT =
+  config.get('discard_arweave_tx_timeout') *
+  MILLISECONDS_IN_SECOND *
+  SECONDS_IN_MINUTE;
+const TX_CONFIRMATIONS = config.get('minimun_txs_confirmations');
 
 export async function downloadFileUrl(fileUrl: string) {
   const fileStream = await axios.get(fileUrl, { responseType: 'stream' });
@@ -48,52 +63,110 @@ export async function chunkIdVerifier(msg) {
   const content = getContent(msg.content);
   const { chunkId } = content;
   try {
-    log.info('Cheking if chunkId has been uploaded to arweave and is valid');
     const arweaveTxId = await getTxIdForChunkId(chunkId);
     if (!arweaveTxId) {
-      await queueBroker.sendMessage('upload', { ...content });
-      log.info('ChunkId not found in arweave, send message to arweaveUploader');
-    } else {
       log.info(
-        `ChunkId found in arweave tx: ${arweaveTxId}, check tx status and we are done`
+        `Not found in arweave chunkId: ${chunkId}, sending message to arweaveUploader`
       );
-      await queueBroker.sendMessage('verifyArweaveTx', {
-        ...content,
-        txid: arweaveTxId,
-      });
+      await queueBroker.sendMessage(UPLOAD_TO_ARWEAVE, { ...content });
+    } else {
+      log.info(`Found in arweave chunkId ${chunkId} txid: ${arweaveTxId}`);
     }
     await queueBroker.ack(msg);
-  } catch (e) {
-    log.error(e);
-    await queueBroker.nack(msg, true);
+  } catch (error: any) {
+    log.info(
+      `Due to previous error we will wait before checking again chunkId: ${chunkId}`
+    );
+    await queueBroker.sendDelayedMessage(
+      VERIFY_CHUNK_ID,
+      content,
+      getRandomTimeInMinutes(2, 10)
+    );
+    await queueBroker.ack(msg);
   }
 }
 
 export async function arweaveTxVerifier(msg) {
   const content = getContent(msg.content);
-  const { txid } = content;
+  const { txid, createdAt } = content;
   try {
     const { status, confirmed } = await getStatus(txid);
     log.info(
-      `txid: ${txid}: status: ${status}${
+      `status ${status} for txid: ${txid} ${
         confirmed ? `, details ${safeStringify(confirmed)}` : ''
       }`
     );
-    if (status === 200 && confirmed?.number_of_confirmations > 10) {
-      log.info('tx is valid so we can ack the msg and everything is ok');
+    if (
+      status === 200 &&
+      confirmed?.number_of_confirmations > TX_CONFIRMATIONS
+    ) {
+      log.info(
+        `Valid tx ${txid} with ${confirmed.number_of_confirmations} confirmations so we can ack the msg and everything is ok`
+      );
       return await queueBroker.ack(msg);
     }
-    log.info(
-      `txid status is not yet confirmed with 10 transactions, waiting ${VERIFY_INTERVAL}s before nack message for txid: ${txid}`
+    if (
+      status === 200 &&
+      confirmed?.number_of_confirmations < TX_CONFIRMATIONS
+    ) {
+      log.info(
+        `txid status ${status} is not yet confirmed only ${confirmed?.number_of_confirmations} confirmations for txid: ${txid}, sending to delayed queue`
+      );
+      await queueBroker.sendDelayedMessage(
+        VERIFY_ARWEAVE_TX,
+        content,
+        getRandomTimeInMinutes(
+          MINIMUM_VERIFY_INTERVAL,
+          MINIMUM_VERIFY_INTERVAL + 10
+        )
+      );
+      return await queueBroker.ack(msg);
+    }
+    const age = Date.now() - createdAt;
+    if (status === 404 && age > DISCARD_ARWEAVE_TX_TIMEOUT) {
+      const { chunkId, fields } = content;
+      log.fatal(
+        `Timeout with status: ${status} for txid: ${txid} Reenqueue to check chunkId again and eventually upload to arweave again`
+      );
+      await queueBroker.sendDelayedMessage(
+        VERIFY_CHUNK_ID,
+        { chunkId, fields },
+        SEND_IMMEDIATELY
+      );
+      await queueBroker.ack(msg);
+      return;
+    }
+    log.error(
+      `tx is not in a valid status: ${status} for txid: ${txid}. Age ${Math.trunc(
+        age / 1000
+      )}s. Because age is lower than ${Math.trunc(
+        DISCARD_ARWEAVE_TX_TIMEOUT / 1000
+      )}s`
     );
-    await delay(VERIFY_INTERVAL);
     log.info(
-      `For txid: ${txid} nack has been sent in order to recheck txid until it's confirmed`
+      `Sent to delayed queue due to invalid status ${status} for txid: ${txid}  It will recheck txid until it has enough confirmations`
     );
-    return await queueBroker.nack(msg, true);
+    await queueBroker.sendDelayedMessage(
+      VERIFY_ARWEAVE_TX,
+      content,
+      getRandomTimeInMinutes(
+        MINIMUM_VERIFY_INTERVAL,
+        MINIMUM_VERIFY_INTERVAL + 10
+      )
+    );
+    await queueBroker.ack(msg);
+    return;
   } catch (e) {
-    log.error({ e });
-    await delay(VERIFY_INTERVAL);
-    return queueBroker.nack(msg, true);
+    console.log({ e });
+    // log.error({ e });
+    log.info(
+      `Due to previous error we will wait before checking again txid: ${txid}`
+    );
+    await queueBroker.sendDelayedMessage(
+      VERIFY_ARWEAVE_TX,
+      content,
+      getRandomTimeInMinutes(0, 10)
+    );
+    await queueBroker.ack(msg);
   }
 }
