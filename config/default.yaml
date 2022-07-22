@@ -17,3 +17,8 @@ log:
 
 queue:
   url: amqp://localhost
+
+minimum_verify_interval: 10
+discard_arweave_tx_timeout: 90
+minimun_txs_confirmations: 5
+max_concurrency: 100

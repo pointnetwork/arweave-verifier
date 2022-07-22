@@ -11,7 +11,7 @@ fastify.get('/health', function (request, reply) {
 // Run the server!
 fastify.listen({ port, host: '0.0.0.0' }, function (err, address) {
   if (err) {
-    fastify.log.error(err);
+    log.error({ err });
     process.exit(1);
   }
   log.info(`Health Server is now listening on ${address}`);
