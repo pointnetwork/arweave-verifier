@@ -29,7 +29,7 @@ export interface QueueInfo {
   queueId: string;
   subscription?: {
     name: string;
-    options: QueueCfg;
+    options: ConsumerQueueCfg;
     isPaused: boolean;
     isDelayed: boolean;
   };
@@ -39,14 +39,12 @@ export type HandlerFactory = (
   queueInfo: QueueInfo
 ) => (msg: ConsumeMessage | null) => void;
 
-export interface QueueCfg {
+export interface ConsumerQueueCfg {
+  handlerFactory: HandlerFactory;
   maxConcurrency?: number;
-  handlerFactory?: (
-    queueInfo: QueueInfo
-  ) => (msg: ConsumeMessage | null) => void;
 }
 
-export interface DelayedQueueCfg extends QueueCfg {
+export interface DelayedQueueCfg {
   ttl: number;
 }
 
@@ -94,37 +92,50 @@ export class QueueBroker {
       healthCheckInterval: 5,
     }
   ) {
-    const { channel, consumerTag, queueId } = queueInfo;
-    if (!consumerTag || !this.channelsByQueueName[queueId]?.subscription) {
-      return;
-    }
-    await channel.cancel(consumerTag);
-    if (typeof healthCheckFunc === 'function') {
+    const { channel, consumerTag, queueId, subscription } = queueInfo;
+    const isPaused = subscription?.isPaused;
+    if (!isPaused && consumerTag) {
       this.channelsByQueueName[queueId].subscription!.isPaused = true;
+      await channel.cancel(consumerTag);
       scheduleCheck(
         healthCheckFunc,
         healthCheckInterval! * MILLISECONDS_IN_SECOND * SECONDS_IN_MINUTE
       );
+      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
+      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
+      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
+      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
+      console.log('pause successfully');
+      return true;
     }
+    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
+    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
+    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
+    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
+    console.log('cound not pause');
+    return false;
   }
 
   async resume(queueInfo: QueueInfo) {
     const { subscription } = queueInfo;
+    const isPaused = subscription?.isPaused;
     if (
-      subscription &&
-      subscription.options.handlerFactory &&
-      subscription.isPaused
+      !subscription ||
+      (subscription && !isPaused) ||
+      !(typeof subscription.options.handlerFactory === 'function')
     ) {
-      const { name, options } = subscription;
-      await (subscription.isDelayed
-        ? this.subscribeDelayed(name, options)
-        : this.subscribe(name, options));
+      return false;
     }
+    const { name, options } = subscription;
+    await (subscription.isDelayed
+      ? this.subscribeDelayed(name, options)
+      : this.subscribe(name, options));
+    return true;
   }
 
   async ensureChannelAndQueue(
     name: string,
-    options?: QueueCfg
+    options?: ConsumerQueueCfg
   ): Promise<QueueInfo> {
     await this.ready;
     if (!this.channelsByQueueName[name]) {
@@ -142,12 +153,12 @@ export class QueueBroker {
     return this.channelsByQueueName[name];
   }
 
-  async ensureChannelAndDelayedQueue(name: string, options: QueueCfg) {
+  async ensureChannelAndDelayedQueue(name: string, options?: ConsumerQueueCfg) {
     const nameWithPrefix = `${WORK_PREFIX}--${name}`;
     await this.ready;
     if (!this.channelsByQueueName[nameWithPrefix]) {
       const channel = await this.connection!.createChannel();
-      if (options.maxConcurrency) {
+      if (options?.maxConcurrency) {
         channel.prefetch(options.maxConcurrency);
       }
       const exchangeDLX = `${name}ExDLX`;
@@ -169,7 +180,7 @@ export class QueueBroker {
     return this.channelsByQueueName[nameWithPrefix];
   }
 
-  async subscribe(queueName: string, options: QueueCfg) {
+  async subscribe(queueName: string, options: ConsumerQueueCfg) {
     const { handlerFactory } = options;
     const queueInfo = await this.ensureChannelAndQueue(queueName, options);
     const { channel, queue, queueId } = queueInfo;
@@ -187,7 +198,7 @@ export class QueueBroker {
     };
   }
 
-  async subscribeDelayed(queueName: string, options: QueueCfg) {
+  async subscribeDelayed(queueName: string, options: ConsumerQueueCfg) {
     const queueInfo = await this.ensureChannelAndDelayedQueue(
       queueName,
       options
@@ -204,16 +215,16 @@ export class QueueBroker {
       name: queueName,
       options,
       isPaused: false,
-      isDelayed: false,
+      isDelayed: true,
     };
   }
 
-  async ensureChannelAndLobby(name: string, options: DelayedQueueCfg) {
+  async ensureChannelAndLobby(name: string, options?: ConsumerQueueCfg) {
     const nameWithPrefix = `${LOBBY_PREFIX}--${name}`;
     await this.ready;
     if (!this.channelsByQueueName[nameWithPrefix]) {
       const channel = await this.connection!.createChannel();
-      if (options.maxConcurrency) {
+      if (options?.maxConcurrency) {
         channel.prefetch(options.maxConcurrency);
       }
       const exchange = `${name}Exchange`;
@@ -243,17 +254,11 @@ export class QueueBroker {
     content: Record<any, any>,
     options: DelayedQueueCfg
   ) {
-    const { channel, queue } = await this.ensureChannelAndLobby(
-      queueName,
-      options
-    );
-    return channel.sendToQueue(
-      queue.queue,
-      Buffer.from(JSON.stringify(content)),
-      {
-        expiration: options.ttl,
-      }
-    );
+    const { channel, queue } = await this.ensureChannelAndLobby(queueName);
+    const queueId = options.ttl === 0 ? `${queueName}Work` : queue.queue;
+    return channel.sendToQueue(queueId, Buffer.from(JSON.stringify(content)), {
+      ...(options.ttl > 0 ? { expiration: options.ttl } : {}),
+    });
   }
 
   async sendMessage(

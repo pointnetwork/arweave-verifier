@@ -22,6 +22,7 @@ chunk_id_verifier:
   max_concurrency: 50
   min_requeue_after_error_time: 5
   max_requeue_after_error_time: 15
+  health_check_interval: 1
 
 arweave_tx_verifier:
   max_concurrency: 50
