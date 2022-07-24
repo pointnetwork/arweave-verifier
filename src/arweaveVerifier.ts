@@ -1,6 +1,7 @@
 import { request as gqlRequest } from 'graphql-request';
 import config from 'config';
 import axios from 'axios';
+import { ConsumeMessage } from 'amqplib';
 import { getContent } from './utils/getContent';
 import { queueBroker, QueueInfo } from './utils/queueBroker';
 import getDownloadQuery from './utils/getDownloadQuery';
@@ -18,7 +19,6 @@ import {
   VERIFY_ARWEAVE_TX,
   VERIFY_CHUNK_ID,
 } from './utils/queueNames';
-import { ConsumeMessage } from 'amqplib';
 
 const SEND_IMMEDIATELY = 0;
 const DISCARD_ARWEAVE_TX_TIMEOUT =
@@ -100,7 +100,8 @@ const arweaveTxVerifierCfg = {
   maxConcurrency: config.get('arweave_tx_verifier.max_concurrency'),
 };
 
-export function arweaveTxVerifierFactory({ channel }: QueueInfo) {
+export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
+  const { channel } = queueInfo;
   return async function arweaveTxVerifier(msg: ConsumeMessage | null) {
     const content = getContent(msg!.content);
     const { txid, createdAt } = content;
@@ -118,7 +119,7 @@ export function arweaveTxVerifierFactory({ channel }: QueueInfo) {
         log.info(
           `Valid tx ${txid} with ${confirmed.number_of_confirmations} confirmations so we can ack the msg and everything is ok`
         );
-        return await channel.ack(msg!);
+        return channel.ack(msg!);
       }
       if (
         status === 200 &&
@@ -133,7 +134,7 @@ export function arweaveTxVerifierFactory({ channel }: QueueInfo) {
             config.get('arweave_tx_verifier.max_verify_interval')
           ),
         });
-        return await channel.ack(msg!);
+        return channel.ack(msg!);
       }
       const age = Date.now() - createdAt;
       if (status === 404 && age > DISCARD_ARWEAVE_TX_TIMEOUT) {
@@ -173,6 +174,12 @@ export function arweaveTxVerifierFactory({ channel }: QueueInfo) {
       log.info(
         `Due to previous error we will wait before checking again txid: ${txid}`
       );
+      queueBroker.pause(queueInfo, {
+        healthCheckFunc: async () => {
+          return true;
+        },
+        healthCheckInterval: 5,
+      });
       await queueBroker.sendDelayedMessage(VERIFY_ARWEAVE_TX, content, {
         ...arweaveTxVerifierCfg,
         ttl: getRandomTimeInMinutes(

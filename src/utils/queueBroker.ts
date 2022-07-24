@@ -7,6 +7,10 @@ import {
   Replies,
 } from 'amqplib';
 import config from 'config';
+import {
+  MILLISECONDS_IN_SECOND,
+  SECONDS_IN_MINUTE,
+} from './getRandomTimeInMinutes';
 import { log } from './logger';
 import { safeStringify } from './safeStringify';
 
@@ -19,12 +23,27 @@ interface QueueBrokerOptions {
 }
 
 export interface QueueInfo {
+  consumerTag?: string;
   channel: Channel;
   queue: Replies.AssertQueue;
+  queueId: string;
+  subscription?: {
+    name: string;
+    options: QueueCfg;
+    isPaused: boolean;
+    isDelayed: boolean;
+  };
 }
+
+export type HandlerFactory = (
+  queueInfo: QueueInfo
+) => (msg: ConsumeMessage | null) => void;
 
 export interface QueueCfg {
   maxConcurrency?: number;
+  handlerFactory?: (
+    queueInfo: QueueInfo
+  ) => (msg: ConsumeMessage | null) => void;
 }
 
 export interface DelayedQueueCfg extends QueueCfg {
@@ -34,6 +53,16 @@ export interface DelayedQueueCfg extends QueueCfg {
 const defaultOptions = { url: 'amqp://localhost' };
 
 let resolver;
+
+function scheduleCheck(healthCheckFunc, interval) {
+  const timeoutId = setTimeout(async () => {
+    if (await healthCheckFunc!()) {
+      clearTimeout(timeoutId);
+    } else {
+      scheduleCheck(healthCheckFunc, interval);
+    }
+  }, interval);
+}
 
 export class QueueBroker {
   connection?: Connection;
@@ -53,23 +82,67 @@ export class QueueBroker {
     resolver();
   }
 
+  async pause(
+    queueInfo: QueueInfo,
+    {
+      healthCheckFunc,
+      healthCheckInterval,
+    }: {
+      healthCheckFunc?: () => Promise<boolean>;
+      healthCheckInterval?: number;
+    } = {
+      healthCheckInterval: 5,
+    }
+  ) {
+    const { channel, consumerTag, queueId } = queueInfo;
+    if (!consumerTag || !this.channelsByQueueName[queueId]?.subscription) {
+      return;
+    }
+    await channel.cancel(consumerTag);
+    if (typeof healthCheckFunc === 'function') {
+      this.channelsByQueueName[queueId].subscription!.isPaused = true;
+      scheduleCheck(
+        healthCheckFunc,
+        healthCheckInterval! * MILLISECONDS_IN_SECOND * SECONDS_IN_MINUTE
+      );
+    }
+  }
+
+  async resume(queueInfo: QueueInfo) {
+    const { subscription } = queueInfo;
+    if (
+      subscription &&
+      subscription.options.handlerFactory &&
+      subscription.isPaused
+    ) {
+      const { name, options } = subscription;
+      await (subscription.isDelayed
+        ? this.subscribeDelayed(name, options)
+        : this.subscribe(name, options));
+    }
+  }
+
   async ensureChannelAndQueue(
     name: string,
-    options: QueueCfg = {}
+    options?: QueueCfg
   ): Promise<QueueInfo> {
     await this.ready;
     if (!this.channelsByQueueName[name]) {
       const channel = await this.connection!.createChannel();
       const queue = await channel.assertQueue(name);
-      if (options.maxConcurrency) {
+      if (options?.maxConcurrency) {
         channel.prefetch(options.maxConcurrency);
       }
-      this.channelsByQueueName[name] = { channel, queue };
+      this.channelsByQueueName[name] = {
+        channel,
+        queue,
+        queueId: name,
+      };
     }
     return this.channelsByQueueName[name];
   }
 
-  async ensureChannelAndDelayedQueue(name: string, options: QueueCfg = {}) {
+  async ensureChannelAndDelayedQueue(name: string, options: QueueCfg) {
     const nameWithPrefix = `${WORK_PREFIX}--${name}`;
     await this.ready;
     if (!this.channelsByQueueName[nameWithPrefix]) {
@@ -87,43 +160,55 @@ export class QueueBroker {
         exclusive: false,
       })) as Replies.AssertQueue;
       await channel.bindQueue(queue.queue, exchangeDLX, routingKeyDLX);
-      this.channelsByQueueName[nameWithPrefix] = { channel, queue };
+      this.channelsByQueueName[nameWithPrefix] = {
+        channel,
+        queue,
+        queueId: nameWithPrefix,
+      };
     }
     return this.channelsByQueueName[nameWithPrefix];
   }
 
-  async subscribe(
-    queueName: string,
-    handlerFactory: (
-      queueInfo: QueueInfo
-    ) => (msg: ConsumeMessage | null) => void
-  ) {
-    const queueInfo = await this.ensureChannelAndQueue(queueName);
-    const { channel, queue } = queueInfo;
+  async subscribe(queueName: string, options: QueueCfg) {
+    const { handlerFactory } = options;
+    const queueInfo = await this.ensureChannelAndQueue(queueName, options);
+    const { channel, queue, queueId } = queueInfo;
     log.info(`Subscribing to queue ${queue.queue}`);
-    channel.consume(queue.queue, handlerFactory(queueInfo));
+    const { consumerTag } = await channel.consume(
+      queue.queue,
+      handlerFactory(queueInfo)
+    );
+    this.channelsByQueueName[queueId].consumerTag = consumerTag;
+    this.channelsByQueueName[queueId].subscription = {
+      name: queueName,
+      options,
+      isPaused: false,
+      isDelayed: false,
+    };
   }
 
-  async subscribeDelayed(
-    queueName: string,
-    handlerFactory: (
-      queueInfo: QueueInfo
-    ) => (msg: ConsumeMessage | null) => void,
-    options: QueueCfg = {}
-  ) {
+  async subscribeDelayed(queueName: string, options: QueueCfg) {
     const queueInfo = await this.ensureChannelAndDelayedQueue(
       queueName,
       options
     );
-    const { channel, queue } = queueInfo;
+    const { channel, queue, queueId } = queueInfo;
+    const { handlerFactory } = options;
     log.info(`Subscribing to delayed queue ${queue.queue}`);
-    await channel.consume(queue.queue, handlerFactory(queueInfo));
+    const { consumerTag } = await channel.consume(
+      queue.queue,
+      handlerFactory(queueInfo)
+    );
+    this.channelsByQueueName[queueId].consumerTag = consumerTag;
+    this.channelsByQueueName[queueId].subscription = {
+      name: queueName,
+      options,
+      isPaused: false,
+      isDelayed: false,
+    };
   }
 
-  async ensureChannelAndLobby(
-    name: string,
-    options: DelayedQueueCfg = { ttl: 0 }
-  ) {
+  async ensureChannelAndLobby(name: string, options: DelayedQueueCfg) {
     const nameWithPrefix = `${LOBBY_PREFIX}--${name}`;
     await this.ready;
     if (!this.channelsByQueueName[nameWithPrefix]) {
@@ -144,7 +229,11 @@ export class QueueBroker {
         deadLetterRoutingKey: routingKeyDLX,
       })) as Replies.AssertQueue;
       await channel?.bindQueue(queue.queue, exchange, '');
-      this.channelsByQueueName[nameWithPrefix] = { channel, queue };
+      this.channelsByQueueName[nameWithPrefix] = {
+        channel,
+        queue,
+        queueId: nameWithPrefix,
+      };
     }
     return this.channelsByQueueName[nameWithPrefix];
   }
