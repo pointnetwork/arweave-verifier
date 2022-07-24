@@ -10,21 +10,19 @@ import { log } from './utils/logger';
 import { safeStringify } from './utils/safeStringify';
 import { getStatus } from './arweaveTransport';
 import {
-  getRandomTimeInMinutes,
-  MILLISECONDS_IN_SECOND,
-  SECONDS_IN_MINUTE,
-} from './utils/getRandomTimeInMinutes';
-import {
-  // UPLOAD_TO_ARWEAVE,
+  UPLOAD_TO_ARWEAVE,
   VERIFY_ARWEAVE_TX,
   VERIFY_CHUNK_ID,
 } from './utils/queueNames';
+import {
+  fromMinutesToMilliseconds,
+  MILLISECONDS_IN_SECOND,
+} from './utils/fromMinutesToMilliseconds';
 
 const SEND_IMMEDIATELY = 0;
-const DISCARD_ARWEAVE_TX_TIMEOUT =
-  config.get('arweave_tx_verifier.discard_tx_timeout') *
-  MILLISECONDS_IN_SECOND *
-  SECONDS_IN_MINUTE;
+const DISCARD_ARWEAVE_TX_TIMEOUT = fromMinutesToMilliseconds(
+  config.get('arweave_tx_verifier.discard_tx_timeout')
+);
 const TX_CONFIRMATIONS = config.get(
   'arweave_tx_verifier.min_txs_confirmations'
 );
@@ -71,60 +69,47 @@ export function chunkIdVerifierFactory(queueInfo: QueueInfo) {
         log.info(
           `Not found in arweave chunkId: ${chunkId}, sending message to arweaveUploader`
         );
-        // await queueBroker.sendMessage(UPLOAD_TO_ARWEAVE, { ...content });
+        await queueBroker.sendMessage(UPLOAD_TO_ARWEAVE, { ...content });
       } else {
         log.info(`Found in arweave chunkId ${chunkId} txid: ${arweaveTxId}`);
-        await queueBroker.sendDelayedMessage(
-          VERIFY_ARWEAVE_TX,
-          { txid: arweaveTxId },
-          { ttl: 0 }
-        );
       }
       channel.ack(msg!);
     } catch (error: any) {
-      // console.log({ error, keys: error });
-      log.info(
-        `Due to previous error we will wait before checking again chunkId: ${chunkId}`
+      log.error(
+        `Due to error will postpone arweave checking for chunkId: ${chunkId} Error Details: ${safeStringify(
+          error
+        )}`
       );
       await queueBroker.sendDelayedMessage(VERIFY_CHUNK_ID, content, {
-        ttl: getRandomTimeInMinutes(
-          config.get('chunk_id_verifier.min_requeue_after_error_time'),
-          config.get('chunk_id_verifier.max_requeue_after_error_time')
+        ttl: fromMinutesToMilliseconds(
+          config.get('arweave_tx_verifier.requeue_after_error_time')
         ),
       });
       channel.ack(msg!);
       if (error?.response?.status === 429) {
-        console.log('======================= about to puase');
         queueBroker.pause(queueInfo, {
           healthCheckFunc: async () => {
-            console.log('healtcheck');
             try {
-              const arweaveTxId = await getTxIdForChunkId(
+              await getTxIdForChunkId(
                 '09cbb8571a50d8eb44933bb261ed8280d9528aee408fb2f90dba15ab6f952f94'
               );
-              if (!arweaveTxId) {
-                console.log('healtcheck fail');
-                return false;
-              }
-              console.log('healtcheck ok');
+              log.info(
+                `Healthcheck has succedd for queue ${queueInfo.subscription?.name}. Will resume worker.`
+              );
               queueBroker.resume(queueInfo);
               return true;
-            } catch (e: any) {
-              console.log({ e, keys: Object.keys(e) });
-              console.log('healtcheck fail2');
+            } catch (healthCheckError: any) {
+              log.error(
+                `Healthcheck failed due to error: ${safeStringify(
+                  healthCheckError
+                )}`
+              );
               return false;
             }
           },
           healthCheckInterval: config.get(
             'chunk_id_verifier.health_check_interval'
           ),
-        });
-      } else {
-        console.log({
-          aaaaaaaaaaaaaa: error,
-          keys: Object.keys(error),
-          xxx: error?.response?.headers,
-          response: error?.response,
         });
       }
     }
@@ -160,9 +145,8 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
           `txid status ${status} is not yet confirmed only ${confirmed?.number_of_confirmations} confirmations for txid: ${txid}, sending to delayed queue`
         );
         await queueBroker.sendDelayedMessage(VERIFY_ARWEAVE_TX, content, {
-          ttl: getRandomTimeInMinutes(
-            config.get('arweave_tx_verifier.min_verify_interval'),
-            config.get('arweave_tx_verifier.max_verify_interval')
+          ttl: fromMinutesToMilliseconds(
+            config.get('arweave_tx_verifier.verify_interval')
           ),
         });
         return channel.ack(msg!);
@@ -192,48 +176,24 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
         `Sent to delayed queue due to invalid status ${status} for txid: ${txid}  It will recheck txid until it has enough confirmations`
       );
       await queueBroker.sendDelayedMessage(VERIFY_ARWEAVE_TX, content, {
-        ttl: getRandomTimeInMinutes(
-          config.get('arweave_tx_verifier.min_verify_interval'),
-          config.get('arweave_tx_verifier.max_verify_interval')
+        ttl: fromMinutesToMilliseconds(
+          config.get('arweave_tx_verifier.verify_interval')
         ),
       });
       channel.ack(msg!);
       return;
-    } catch (e) {
-      console.log({ e });
-      // log.error({ e });
-      log.info(
-        `Due to previous error we will wait before checking again txid: ${txid}`
+    } catch (error: any) {
+      log.error(
+        `Due to error will postpone arweave checking for txid: ${txid} Error Details: ${safeStringify(
+          error
+        )}`
       );
       await queueBroker.sendDelayedMessage(VERIFY_ARWEAVE_TX, content, {
-        ttl: getRandomTimeInMinutes(
-          config.get('arweave_tx_verifier.min_requeue_after_error_time'),
-          config.get('arweave_tx_verifier.max_requeue_after_error_time')
+        ttl: fromMinutesToMilliseconds(
+          config.get('arweave_tx_verifier.requeue_after_error_time')
         ),
       });
       channel.ack(msg!);
-      // queueBroker.pause(queueInfo, {
-      //   healthCheckFunc: async () => {
-      //     return true;
-      //   },
-      //   healthCheckInterval: 5,
-      // });
     }
   };
 }
-
-/*
-  aaaaaaaaaaaaaa: FetchError: request to https://arweave.net/graphql failed, reason: connect ETIMEDOUT 18.67.0.68:443
-      at ClientRequest.<anonymous> (/Users/brian/pn/arweave-verifier/node_modules/node-fetch/lib/index.js:1491:11)
-      at ClientRequest.emit (node:events:527:28)
-      at TLSSocket.socketErrorListener (node:_http_client:454:9)
-      at TLSSocket.emit (node:events:527:28)
-      at emitErrorNT (node:internal/streams/destroy:157:8)
-      at emitErrorCloseNT (node:internal/streams/destroy:122:3)
-      at processTicksAndRejections (node:internal/process/task_queues:83:21) {
-    type: 'system',
-    errno: 'ETIMEDOUT',
-    code: 'ETIMEDOUT'
-  },
-  keys: [ 'message', 'type', 'errno', 'code' ]logstash.pointspace.io
-*/

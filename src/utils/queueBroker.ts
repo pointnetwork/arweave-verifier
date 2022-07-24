@@ -10,7 +10,7 @@ import config from 'config';
 import {
   MILLISECONDS_IN_SECOND,
   SECONDS_IN_MINUTE,
-} from './getRandomTimeInMinutes';
+} from './fromMinutesToMilliseconds';
 import { log } from './logger';
 import { safeStringify } from './safeStringify';
 
@@ -101,18 +101,11 @@ export class QueueBroker {
         healthCheckFunc,
         healthCheckInterval! * MILLISECONDS_IN_SECOND * SECONDS_IN_MINUTE
       );
-      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
-      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
-      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
-      console.log('#$#$#$#$$$$$$%$%^^^^^^^^%%$');
-      console.log('pause successfully');
+      log.info(
+        'Worker has been paused until healtcheck is succesful. Current messages will be processed but no new messages will be received'
+      );
       return true;
     }
-    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
-    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
-    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
-    console.log('$$$$$$$$$$$$$$$$$$$$$$$$$$$');
-    console.log('cound not pause');
     return false;
   }
 

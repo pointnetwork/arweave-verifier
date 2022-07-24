@@ -1,5 +1,6 @@
 port: 80
 testmode: 0
+keep_alive_interval: 1
 arweave:
   host: arweave.net
   port: 443
@@ -20,15 +21,12 @@ queue:
 
 chunk_id_verifier:
   max_concurrency: 50
-  min_requeue_after_error_time: 5
-  max_requeue_after_error_time: 15
-  health_check_interval: 1
+  requeue_after_error_time: 5
+  health_check_interval: 0.5
 
 arweave_tx_verifier:
-  max_concurrency: 50
-  min_verify_tx_interval: 20
-  max_verify_tx_interval: 30
-  discard_tx_timeout: 90
+  max_concurrency: 100
+  verify_interval: 20
+  discard_tx_timeout: 120
   min_txs_confirmations: 5
-  min_requeue_after_error_time: 5
-  max_requeue_after_error_time: 15
+  requeue_after_error_time: 2
