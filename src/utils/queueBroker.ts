@@ -12,7 +12,6 @@ import {
   SECONDS_IN_MINUTE,
 } from './fromMinutesToMilliseconds';
 import { log } from './logger';
-import { safeStringify } from './safeStringify';
 
 const WORK_PREFIX = 'work';
 const LOBBY_PREFIX = 'lobby';
@@ -84,7 +83,6 @@ export class QueueBroker {
       this.options.hostname
     );
     const queueUrl = this.options.url as string;
-    console.log({ useUrl, opt: this.options });
     this.connection = await connect(
       useUrl
         ? queueUrl
@@ -120,7 +118,7 @@ export class QueueBroker {
         healthCheckInterval! * MILLISECONDS_IN_SECOND * SECONDS_IN_MINUTE
       );
       log.info(
-        `Worker for ${queue.queue}has been paused until healtcheck is succesful. Current messages will be processed but no new messages will be received`
+        `Worker for ${queue.queue} has been paused until healtcheck is succesful. Current messages will be processed but no new messages will be received`
       );
       return true;
     }
@@ -278,9 +276,6 @@ export class QueueBroker {
     options?: Options.Publish
   ) {
     const { channel, queue } = await this.ensureChannelAndQueue(queueName);
-    log.info(
-      `Sending message to ${queueName} with content ${safeStringify(content)}`
-    );
     return channel.sendToQueue(
       queue.queue,
       Buffer.from(JSON.stringify(content)),

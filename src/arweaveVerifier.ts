@@ -19,6 +19,8 @@ import {
   MILLISECONDS_IN_SECOND,
 } from './utils/fromMinutesToMilliseconds';
 
+const HEALTH_CHECK_CHUNK_ID =
+  '09cbb8571a50d8eb44933bb261ed8280d9528aee408fb2f90dba15ab6f952f94';
 const SEND_IMMEDIATELY = 0;
 const DISCARD_ARWEAVE_TX_TIMEOUT = fromMinutesToMilliseconds(
   config.get('arweave_tx_verifier.discard_tx_timeout')
@@ -90,11 +92,9 @@ export function chunkIdVerifierFactory(queueInfo: QueueInfo) {
         queueBroker.pause(queueInfo, {
           healthCheckFunc: async () => {
             try {
-              await getTxIdForChunkId(
-                '09cbb8571a50d8eb44933bb261ed8280d9528aee408fb2f90dba15ab6f952f94'
-              );
+              await getTxIdForChunkId(HEALTH_CHECK_CHUNK_ID);
               log.info(
-                `Healthcheck has succedd for queue ${queueInfo.subscription?.name}. Will resume worker.`
+                `Healthcheck has succeed for queue ${queueInfo.subscription?.name}. Will resume worker.`
               );
               queueBroker.resume(queueInfo);
               return true;
@@ -147,7 +147,7 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
                 return false;
               }
               log.info(
-                `Healthcheck has succedd for queue ${queueInfo.subscription?.name}. Will resume worker.`
+                `Healthcheck has succeed for queue ${queueInfo.subscription?.name}. Will resume worker.`
               );
               queueBroker.resume(queueInfo);
               return true;
@@ -164,6 +164,7 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
             'chunk_id_verifier.health_check_interval'
           ),
         });
+        return;
       }
       if (
         [200, 202].includes(status) &&
