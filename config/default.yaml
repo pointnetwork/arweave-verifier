@@ -25,7 +25,7 @@ chunk_id_verifier:
   health_check_interval: 0.5
 
 arweave_tx_verifier:
-  max_concurrency: 100
+  max_concurrency: 50
   verify_interval: 20
   discard_tx_timeout: 120
   min_txs_confirmations: 5
