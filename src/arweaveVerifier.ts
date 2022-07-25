@@ -128,8 +128,43 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
           confirmed ? `, details ${safeStringify(confirmed)}` : ''
         }`
       );
+      if (status === 429) {
+        await queueBroker.sendDelayedMessage(VERIFY_ARWEAVE_TX, content, {
+          ttl: fromMinutesToMilliseconds(
+            config.get('arweave_tx_verifier.verify_interval')
+          ),
+        });
+        channel.ack(msg!);
+        queueBroker.pause(queueInfo, {
+          healthCheckFunc: async () => {
+            try {
+              const { status } = await getStatus(txid);
+              if (status === 429) {
+                log.error(
+                  'Healthcheck failed for tx verifier due to status 429'
+                );
+                return false;
+              }
+              log.info(
+                `Healthcheck has succedd for queue ${queueInfo.subscription?.name}. Will resume worker.`
+              );
+              queueBroker.resume(queueInfo);
+              return true;
+            } catch (healthCheckError: any) {
+              log.error(
+                `Healthcheck failed for tx verifier due to error: ${safeStringify(
+                  healthCheckError
+                )}`
+              );
+              return false;
+            }
+          },
+          healthCheckInterval: config.get(
+            'chunk_id_verifier.health_check_interval'
+          ),
+        });
       if (
-        status === 200 &&
+        [200, 202].includes(status) &&
         confirmed?.number_of_confirmations > TX_CONFIRMATIONS
       ) {
         log.info(
@@ -138,7 +173,7 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
         return channel.ack(msg!);
       }
       if (
-        status === 200 &&
+        [200, 202].includes(status) &&
         confirmed?.number_of_confirmations < TX_CONFIRMATIONS
       ) {
         log.info(
