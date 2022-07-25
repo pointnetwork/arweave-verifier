@@ -110,7 +110,7 @@ export class QueueBroker {
       healthCheckInterval: 5,
     }
   ) {
-    const { channel, consumerTag, queueId, subscription } = queueInfo;
+    const { channel, consumerTag, queueId, subscription, queue } = queueInfo;
     const isPaused = subscription?.isPaused;
     if (!isPaused && consumerTag) {
       this.channelsByQueueName[queueId].subscription!.isPaused = true;
@@ -120,7 +120,7 @@ export class QueueBroker {
         healthCheckInterval! * MILLISECONDS_IN_SECOND * SECONDS_IN_MINUTE
       );
       log.info(
-        'Worker has been paused until healtcheck is succesful. Current messages will be processed but no new messages will be received'
+        `Worker for ${queue.queue}has been paused until healtcheck is succesful. Current messages will be processed but no new messages will be received`
       );
       return true;
     }

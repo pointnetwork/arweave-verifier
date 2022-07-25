@@ -138,6 +138,7 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
         queueBroker.pause(queueInfo, {
           healthCheckFunc: async () => {
             try {
+              // eslint-disable-next-line @typescript-eslint/no-shadow
               const { status } = await getStatus(txid);
               if (status === 429) {
                 log.error(
