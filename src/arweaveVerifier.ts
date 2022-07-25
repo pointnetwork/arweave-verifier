@@ -163,6 +163,7 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
             'chunk_id_verifier.health_check_interval'
           ),
         });
+      }
       if (
         [200, 202].includes(status) &&
         confirmed?.number_of_confirmations > TX_CONFIRMATIONS
