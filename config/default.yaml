@@ -29,4 +29,4 @@ arweave_tx_verifier:
   verify_interval: 20
   discard_tx_timeout: 120
   min_txs_confirmations: 5
-  requeue_after_error_time: 2
+  requeue_after_error_time: 20
