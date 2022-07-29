@@ -23,10 +23,12 @@ chunk_id_verifier:
   max_concurrency: 50
   requeue_after_error_time: 5
   health_check_interval: 0.5
+  bundled_chunk_id_timeout: 240
+  requeue_bundle_chunk_id_time: 60
 
 arweave_tx_verifier:
-  max_concurrency: 50
-  verify_interval: 20
-  discard_tx_timeout: 120
-  min_txs_confirmations: 5
-  requeue_after_error_time: 20
+  max_concurrency: 1
+  verify_interval: 2
+  discard_tx_timeout: 1200
+  min_txs_confirmations: 1
+  requeue_after_error_time: 2
