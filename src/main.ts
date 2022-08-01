@@ -2,7 +2,6 @@ import config from 'config';
 import axios from 'axios';
 import { queueBroker } from './utils/queueBroker';
 import { log } from './utils/logger';
-
 import {
   arweaveTxVerifierFactory,
   chunkIdVerifierFactory,
@@ -12,36 +11,23 @@ import {
   VERIFY_CHUNK_ID,
   VERIFY_CHUNK_ID_LONG,
 } from './utils/queueNames';
-import { safeStringify } from './utils/safeStringify';
 import { fromMinutesToMilliseconds } from './utils/fromMinutesToMilliseconds';
 
 export async function main() {
   log.info('Subscribing to verify tx and chunkId queue');
   await queueBroker.subscribeDelayed(VERIFY_BUNDLED_TX, {
     handlerFactory: arweaveTxVerifierFactory,
-    maxConcurrency: 1, // config.get('arweave_tx_verifier.max_concurrency'),
+    maxConcurrency: config.get('arweave_tx_verifier.max_concurrency'),
   });
-  // await queueBroker.subscribeDelayed(VERIFY_CHUNK_ID, {
-  //   handlerFactory: chunkIdVerifierFactory,
-  //   maxConcurrency: config.get('chunk_id_verifier.max_concurrency'),
-  // });
-  // await queueBroker.subscribeDelayed(VERIFY_CHUNK_ID_LONG, {
-  //   handlerFactory: chunkIdVerifierFactory,
-  //   maxConcurrency: config.get('chunk_id_verifier.max_concurrency'),
-  // });
+  await queueBroker.subscribeDelayed(VERIFY_CHUNK_ID, {
+    handlerFactory: chunkIdVerifierFactory,
+    maxConcurrency: config.get('chunk_id_verifier.max_concurrency'),
+  });
+  await queueBroker.subscribeDelayed(VERIFY_CHUNK_ID_LONG, {
+    handlerFactory: chunkIdVerifierFactory,
+    maxConcurrency: config.get('chunk_id_verifier.max_concurrency'),
+  });
 }
-
-process.on('uncaughtException', function (error: any) {
-  if (error?.code !== 'ENETDOWN') {
-    log.error(
-      'Logger error connection has failed. It will not exit the process'
-    );
-    process.exit(1);
-  } else {
-    log.error(`Uncaught error: ${safeStringify(error)}`);
-    process.exit(1);
-  }
-});
 
 function keepAppAlive() {
   const appName = process.env.HEROKU_APP_NAME;
@@ -56,8 +42,8 @@ function keepAppAlive() {
       } catch {
         // do nothing, it will try again
       }
+      keepAppAlive();
     }, interval);
-    keepAppAlive();
   }
 }
 

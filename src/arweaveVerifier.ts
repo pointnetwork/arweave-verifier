@@ -42,11 +42,15 @@ export async function downloadFileUrl(fileUrl: string) {
     responseType: 'stream',
     timeout: 120000,
   });
-  return new Promise(async (resolve) => {
+  return new Promise(async (resolve, reject) => {
     const data: any = [];
-    (fileStream.data as any)
+    const stream = fileStream.data as any;
+    stream
       .on('data', (chunk: any) => {
         data.push(chunk);
+      })
+      .on('error', (err) => {
+        reject(err);
       })
       .on('end', () => {
         const buffer = Buffer.concat(data);
@@ -211,10 +215,8 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
           `Valid tx ${txid} with ${confirmed.number_of_confirmations} confirmations. Will check bundle integrity`
         );
         try {
-          const file = (await downloadFileUrl(
-            `https://arweave.net/${txid}`
-          )) as Buffer;
-          const bundle = new Bundle(file);
+          const file = await downloadFileUrl(`https://arweave.net/${txid}`);
+          const bundle = new Bundle(file as Buffer);
           if (await bundle.verify()) {
             const ids = bundle.getIds();
             const calculatedIds = signatures
@@ -237,15 +239,30 @@ export function arweaveTxVerifierFactory(queueInfo: QueueInfo) {
           }
           throw Error('Bundle verification failed');
         } catch (error: any) {
-          console.log({ error });
-          if (error.response?.status === 404) {
+          if (
+            ['ENETDOWN', 'ECONNRESET'].includes(error?.code) ||
+            error.response?.status === 404
+          ) {
             // the tx is ok but the content is not there, we should reupload the content of the tx
+            log.info(
+              `The tx ${txid} is ok but the files are corrupted. Will reupload`
+            );
             await queueBroker.sendDelayedMessage(REUPLOAD_TO_ARWEAVE, content, {
-              ttl: 1000 * 60,
+              ttl: 0,
             });
+            return channel.ack(msg!);
           }
+          log.fatal(
+            `Unexpected error trying to verify bundle arweave tx ${txid}, details: ${safeStringify(
+              error
+            )}`
+          );
+          await queueBroker.sendDelayedMessage(VERIFY_BUNDLED_TX, content, {
+            ttl: fromMinutesToMilliseconds(
+              config.get('arweave_tx_verifier.requeue_after_error_time')
+            ),
+          });
         }
-        return channel.ack(msg!);
       }
       if (
         [200, 202].includes(status) &&
