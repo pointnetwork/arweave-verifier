@@ -1,5 +1,6 @@
 port: 80
 testmode: 0
+keep_alive_interval: 1
 arweave:
   host: arweave.net
   port: 443
@@ -17,3 +18,17 @@ log:
 
 queue:
   url: amqp://localhost
+
+chunk_id_verifier:
+  max_concurrency: 25
+  requeue_after_error_time: 5
+  health_check_interval: 1
+  bundled_chunk_id_timeout: 240
+
+arweave_tx_verifier:
+  max_concurrency: 25
+  health_check_interval: 1
+  verify_interval: 10
+  discard_tx_timeout: 1200
+  min_txs_confirmations: 5
+  requeue_after_error_time: 4
