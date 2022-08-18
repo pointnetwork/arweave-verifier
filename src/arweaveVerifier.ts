@@ -25,7 +25,7 @@ import {
 } from './utils/fromMinutesToMilliseconds';
 
 const HEALTH_CHECK_CHUNK_ID =
-  '09cbb8571a50d8eb44933bb261ed8280d9528aee408fb2f90dba15abnpm run 6f952f94';
+  '09cbb8571a50d8eb44933bb261ed8280d9528aee408fb2f90dba15ab6f952f94';
 const DISCARD_ARWEAVE_TX_TIMEOUT = fromMinutesToMilliseconds(
   config.get('arweave_tx_verifier.discard_tx_timeout')
 );
